@@ -1,8 +1,8 @@
-version: '3.8'
+version: '3'
 services:
-  ssl_monitor:
+  app:
     build: .
-    env_file: .env
     volumes:
-      - ./logs:/app/logs
-    restart: unless-stopped
+      - .:/app
+    env_file: 
+      - .env

@@ -22,22 +22,11 @@ install: venv
 	$(VENV_DIR)/bin/pip install --upgrade pip
 	$(VENV_DIR)/bin/pip install -r $(REQUIREMENTS)
 
-## run: Run the application
-run: install
-	$(VENV_DIR)/bin/python app.py
-
-## lint: Run code linters (flake8)
-lint: install
-	$(VENV_DIR)/bin/flake8 .
 
 ## clean: Remove the virtual environment and other temporary files
 clean:
 	rm -rf $(VENV_DIR)
 	find . -type f -name '*.pyc' -delete
 	find . -type d -name '__pycache__' -delete
-
-## test: Run tests using pytest
-test: install
-	$(VENV_DIR)/bin/pytest
 
 .PHONY: help venv install run lint clean test
