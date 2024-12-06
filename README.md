@@ -1,18 +1,16 @@
-Here’s a sample `README.md` for your **CertMonitor** project:
+# CertMonitor
+
+**CertMonitor** is a Python-based application designed to fetch newly registered SSL certificates from certificate transparency logs (e.g., CertStream) and store them in Elasticsearch. The application ensures consistency and scalability, supporting configurable logging and security options.
 
 ---
 
-# CertMonitor
-
-**CertMonitor** is a Python-based application designed to fetch newly registered SSL certificates from certificate transparency logs (e.g., `crt.sh`) and store them in Elasticsearch. The application ensures consistency by keeping track of the last processed certificates to avoid re-fetching old data.
-
 ## Features
 
-- Fetches newly issued SSL certificates from `crt.sh`.
-- Stores certificates in an Elasticsearch index.
-- Tracks the last processed timestamp to ensure no duplicate processing.
+- Fetches newly issued SSL certificates via CertStream.
+- Stores certificate details in an Elasticsearch index.
+- Configurable logging level and options for suppressing TLS warnings.
 - Dockerized for easy deployment.
-- Configurable via environment variables.
+- Highly customizable via environment variables.
 
 ---
 
@@ -34,16 +32,23 @@ cd certmonitor
 
 ## Configuration
 
-The application uses the following environment variables to configure its behavior:
+The application uses environment variables to configure its behavior. Define these variables in a `.env` file located in the root directory.
+
+### Environment Variables
 
 | Variable                  | Description                                 | Default Value             |
 |---------------------------|---------------------------------------------|---------------------------|
 | `ELASTICSEARCH_HOST`      | Hostname or IP of the Elasticsearch server | `localhost`               |
 | `ELASTICSEARCH_PORT`      | Port of the Elasticsearch server           | `9200`                    |
 | `ELASTICSEARCH_INDEX`     | Index name for storing SSL certificates    | `ssl_certificates`        |
-| `ELASTICSEARCH_STATE`     | Index name for tracking fetch state        | `certmonitor_state`       |
 | `ELASTICSEARCH_USERNAME`  | Elasticsearch username (optional)          | `None`                    |
 | `ELASTICSEARCH_PASSWORD`  | Elasticsearch password (optional)          | `None`                    |
+| `ELASTICSEARCH_VERIFY_CERTS` | Verify SSL/TLS certificates when connecting to Elasticsearch (`True`/`False`) | `False`                  |
+| `LOG_LEVEL`               | Logging level (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`) | `INFO`                   |
+
+### Suppressing TLS Warnings
+
+By default, the application uses the `ELASTICSEARCH_VERIFY_CERTS` variable to decide whether to verify Elasticsearch SSL/TLS certificates. Set this to `False` to disable verification, and the application will suppress related warnings automatically.
 
 ---
 
@@ -58,13 +63,13 @@ The application uses the following environment variables to configure its behavi
    ```bash
    python3 -m venv venv
    source venv/bin/activate
-   pip install -r app/requirements.txt
+   pip install -r requirements.txt
    ```
 
 2. **Run the Application**
 
    ```bash
-   python app/main.py
+   python main.py
    ```
 
 ### Running with Docker
@@ -91,32 +96,49 @@ The application uses the following environment variables to configure its behavi
 
 ## How It Works
 
-1. **Initial Run**:
-   - Fetches certificates from the last 5 minutes.
-   - Processes and stores them in the Elasticsearch data index.
-   - Updates the last processed timestamp in the Elasticsearch state index.
+1. **Certificate Stream**:
+   - Fetches real-time SSL certificate data from CertStream.
+   - Processes the data and stores it in the Elasticsearch index.
 
-2. **Subsequent Runs**:
-   - Fetches certificates issued since the last processed timestamp.
-   - Ensures no duplicates by checking against the state index.
+2. **Batch Processing**:
+   - Buffers certificates in batches of 100 before indexing in Elasticsearch.
+   - Ensures efficient storage and reduces network overhead.
 
-3. **Periodic Fetch**:
-   - Runs every 5 minutes to fetch and process new certificates.
+3. **Customizable Logging**:
+   - Set the `LOG_LEVEL` to control the verbosity of application logs.
+
+4. **Elasticsearch Integration**:
+   - Stores detailed SSL certificate information in the configured index.
+   - Optionally verifies SSL/TLS certificates using the `ELASTICSEARCH_VERIFY_CERTS` variable.
 
 ---
 
 ## Elasticsearch Indices
 
 ### `ssl_certificates`
-Stores the detailed SSL certificate data fetched from `crt.sh`.
 
-### `certmonitor_state`
-Tracks metadata about the fetching process, including the most recent timestamp.
+Stores detailed SSL certificate data, including subject information, domains, validity periods, and extensions.
 
-#### Example Document in `certmonitor_state`
+#### Example Document
 ```json
 {
-  "timestamp": "2024-12-05T10:00:00Z"
+  "@timestamp": "2024-12-06T10:00:00Z",
+  "message_type": "certificate_update",
+  "subject": {
+    "common_name": "example.com",
+    "organization": "Example Org",
+    "country": "US"
+  },
+  "domains": {
+    "primary_domain": "example.com",
+    "additional_domains": ["www.example.com", "mail.example.com"]
+  },
+  "certificate": {
+    "not_before": "2024-12-01T00:00:00Z",
+    "not_after": "2025-12-01T00:00:00Z",
+    "serial_number": "123456789ABCDEF",
+    "fingerprint": "SHA256:..."
+  }
 }
 ```
 
@@ -124,20 +146,20 @@ Tracks metadata about the fetching process, including the most recent timestamp.
 
 ## Extending the Application
 
-1. **Add New Sources**:
-   - Modify `fetch_ssl.py` to integrate additional sources like Let's Encrypt or other transparency logs.
+1. **Add New Data Sources**:
+   - Modify the `parse_certificate_update` function to incorporate other certificate transparency sources.
 
-2. **Add Notifications**:
-   - Integrate with Slack, email, or webhooks to notify about newly added certificates.
+2. **Enhance Elasticsearch Mappings**:
+   - Define custom mappings for the `ssl_certificates` index to optimize search queries and improve performance.
 
-3. **Optimize Elasticsearch Mappings**:
-   - Update index mappings for `ssl_certificates` to optimize search and retrieval.
+3. **Integrate Alerting Mechanisms**:
+   - Add webhook or email notifications to alert about specific certificate updates.
 
 ---
 
 ## Contributing
 
-Contributions are welcome! Please fork the repository and submit a pull request.
+Contributions are welcome! Fork the repository and submit a pull request.
 
 ---
 
@@ -146,5 +168,3 @@ Contributions are welcome! Please fork the repository and submit a pull request.
 This project is licensed under the MIT License. See the `LICENSE` file for details.
 
 ---
-
-Let me know if you’d like to include more details or adjust any part of the `README.md`!
