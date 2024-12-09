@@ -2,8 +2,11 @@ version: '3'
 services:
   app:
     build: .
+    container_name: certmonitor_app
     volumes:
       - .:/app
+    working_dir: /app
     env_file: 
       - .env
     restart: always
+    command: python main.py

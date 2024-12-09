@@ -17,9 +17,10 @@ env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '.env'
 load_dotenv(env_path)
 
 # Configure logging
+logging_level = os.getenv("LOGGING_LEVEL", "WARNING").upper()
 logging.basicConfig(
     format='[%(levelname)s:%(name)s] %(asctime)s - %(message)s',
-    level=logging.WARNING  # Change level to WARNING
+    level=getattr(logging, logging_level, logging.WARNING)
 )
 
 # Elasticsearch configuration
@@ -108,11 +109,13 @@ def print_callback(message, context):
     global batch
     if message['message_type'] != "certificate_update":
         return
-
+    
+    logging.info(f"Processing message: {message}")
     parsed_data = parse_certificate_update(message)
     batch.append(parsed_data)
-
+    
     if len(batch) >= BATCH_SIZE:
+        logging.info(f"Batch size reached: {len(batch)}. Inserting to Elasticsearch.")
         insert_to_elasticsearch()
 
 def insert_to_elasticsearch():
@@ -132,7 +135,10 @@ def on_open():
     logging.info("Connection successfully established!")
 
 def on_error(instance, exception=None):
-    logging.error(f"Exception in CertStreamClient! -> {exception}")
+    if exception:
+        logging.error(f"Exception in CertStreamClient: {type(exception).__name__} - {exception}")
+    else:
+        logging.error("Unknown exception occurred in CertStreamClient!")
 
 def main():
     try:
