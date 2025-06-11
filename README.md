@@ -1,56 +1,55 @@
 # Certificate Transparency Monitor
 
-**CertMonitor** is a Python3 application that continuously monitors Certificate Transparency (CT) logs for newly issued X.509 and Precertificate entries and indexes them into Elasticsearch.
+**CertMonitor** is a Python 3.11+ application that monitors Certificate Transparency (CT) logs for new X.509 and Precertificate entries and indexes them into Elasticsearch using the official Python client.
 
 ---
 
 ## Project Structure
 
 ```
-CertMonitor/        # project root
-├── app/
-│   └── main.py      # entrypoint
-├── Dockerfile       # container build instructions
-├── docker-compose.yml
-├── requirements.txt
-├── .env_sample       # example environment file
-├── README.md         # this documentation
-└── Makefile          # helper commands (optional)
+CertMonitor/
+├── src/
+│   ├── config.py         # Loads environment variables and configuration
+│   ├── ct_parser.py      # Parses CT entries into metadata
+│   ├── ct_utils.py       # HTTP utility and CT log list loader
+│   ├── elastic.py        # Elasticsearch client and index setup
+│   ├── main.py           # Entrypoint
+│   ├── monitor.py        # Monitoring and indexing logic
+│   └── __pycache__/      # Compiled Python cache
+├── .env_sample           # Sample env config
+├── .gitignore
+├── docker-compose.yml    # Docker orchestration
+├── Dockerfile            # Image definition
+├── Makefile              # Optional automation commands
+├── README.md             # This documentation
+└── requirements.txt      # Python dependencies
 ```
 
 ---
 
 ## Features
 
-* Fetches and parses CT log entries from all usable logs listed in [Google's CT log list](https://www.gstatic.com/ct/log_list/v3/log_list.json).
-* Supports both X.509 and Precertificate entry types.
-* Deduplicates via in-memory caching (TTL-based) to avoid reprocessing certificates.
-* Batch indexing into Elasticsearch using the Bulk API.
-* Robust HTTP requests with retries, exponential backoff, and 429 handling.
-* Configurable via environment variables or a `.env` file.
-* Graceful shutdown on `SIGINT` and `SIGTERM`.
-* (Optional) Dockerized for container-based deployment.
+* Monitors all usable logs from [Google's CT log list](https://www.gstatic.com/ct/log_list/v3/log_list.json)
+* Handles both X.509 and Precertificate entries
+* Caches seen certificates with TTL to avoid duplication
+* Multi-threaded log ingestion
+* Uses Elasticsearch Bulk API for high-efficiency indexing
+* Resilient HTTP client with retry and backoff
+* Graceful shutdown support via `SIGINT`/`SIGTERM`
+* Docker and Compose compatible
 
 ---
 
-## Prerequisites
+## Quick Start
 
-* Python 3.7+
-* Elasticsearch 7.x or 8.x
-* (Optional) Docker & Docker Compose for containerized deployment
-
----
-
-## Installation
-
-### Clone the repository
+### 1. Clone the repository
 
 ```bash
 git clone https://github.com/dig-sec/CertMonitor.git
-cd ct-monitor
+cd CertMonitor
 ```
 
-### Python setup
+### 2. Create and activate a virtual environment
 
 ```bash
 python3 -m venv venv
@@ -58,165 +57,89 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### Environment variables
-
-Copy the sample and edit values:
+### 3. Configure environment variables
 
 ```bash
 cp .env_sample .env
-# then edit .env with your settings
+# Edit .env with your Elasticsearch credentials and config
 ```
 
 ---
 
-## Docker Deployment
+## Docker Setup
 
-A `Dockerfile` and `docker-compose.yml` are provided for containerized runs.
-
-### Dockerfile
-
-```dockerfile
-FROM python:3.11-slim
-WORKDIR /app
-
-RUN apt-get update && apt-get install -y \
-    curl \
-    ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-
-COPY requirements.txt ./
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    && pip install -r requirements.txt \
-    && apt-get remove -y build-essential \
-    && apt-get autoremove -y \
-    && rm -rf /var/lib/apt/lists/*
-
-COPY . .
-
-CMD ["python", "app/main.py"]
-```
-
-### docker-compose.yml
-
-```yaml
-version: '3.8'
-services:
-  certmonitor:
-    build:
-      context: .
-    container_name: certmonitor
-    working_dir: /app
-    env_file: .env
-    volumes:
-      - ./:/app
-    restart: unless-stopped
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-```
-
-Bring up the container:
+### Build and Run with Docker Compose
 
 ```bash
-docker-compose up -d
+docker-compose up --build
 ```
+
+This spins up the monitor container and runs it using settings from `.env`.
 
 ---
 
 ## Configuration
 
-Configure via environment variables in `.env` (see `.env_sample`):
+Edit the `.env` file or override using environment variables:
 
-| Variable                 | Default                                                | Description                            |
-| ------------------------ | ------------------------------------------------------ | -------------------------------------- |
-| `CT_LOG_LIST_URL`        | `https://www.gstatic.com/ct/log_list/v3/log_list.json` | CT log list metadata URL               |
-| `ELASTICSEARCH_HOSTS`    | `http://localhost:9200`                                | Elasticsearch host(s), comma-separated |
-| `ELASTICSEARCH_INDEX`    | `ssl_certificates`                                     | Target index name                      |
-| `ELASTICSEARCH_USERNAME` | `elastic`                                              | Elasticsearch username                 |
-| `ELASTICSEARCH_PASSWORD` | `changeme`                                             | Elasticsearch password                 |
-| `FETCH_INTERVAL`         | `60`                                                   | Seconds between batch polls            |
-| `BATCH_SIZE`             | `256`                                                  | Entries per bulk request               |
-| `CACHE_MAXSIZE`          | `100000`                                               | Max entries in cache                   |
-| `CACHE_TTL`              | `3600`                                                 | Cache TTL (seconds)                    |
-| `REQUEST_TIMEOUT`        | `10`                                                   | HTTP request timeout (seconds)         |
-
----
-
-## Usage
-
-### Local
-
-```bash
-python app/main.py
-```
-
-### Docker
-
-```bash
-docker-compose up -d
-```
-
-The monitor will:
-
-1. Connect to Elasticsearch and create the index/template if missing.
-2. Load all usable CT logs and spawn one thread per log.
-3. Fetch new entries in batches, parse and dedupe.
-4. Bulk index to Elasticsearch until interrupted.
-
----
-
-## Elasticsearch Index Template
-
-An example template to ensure correct mappings:
-
-```http
-PUT _index_template/ct-monitor-template
-{
-  "index_patterns": ["ct-monitor*"],
-  "template": { "mappings": { /* see mappings below */ } },
-  "priority": 500
-}
-```
-
-Full mapping properties include date, keywords for fingerprints, issuer\_cn, subject\_cn, validity dates, public key info, URLs, key usages, and more.
+| Variable                 | Default                                                | Description                     |
+| ------------------------ | ------------------------------------------------------ | ------------------------------- |
+| `CT_LOG_LIST_URL`        | `https://www.gstatic.com/ct/log_list/v3/log_list.json` | Google’s CT log list            |
+| `ELASTICSEARCH_HOSTS`    | `http://localhost:9200`                                | One or more Elasticsearch hosts |
+| `ELASTICSEARCH_INDEX`    | `ssl_certificates`                                     | Index for storing parsed certs  |
+| `ELASTICSEARCH_USERNAME` | `elastic`                                              | Auth username                   |
+| `ELASTICSEARCH_PASSWORD` | `changeme`                                             | Auth password                   |
+| `FETCH_INTERVAL`         | `60`                                                   | Polling interval (seconds)      |
+| `BATCH_SIZE`             | `256`                                                  | Entry batch size                |
+| `CACHE_MAXSIZE`          | `100000`                                               | Max cached fingerprints         |
+| `CACHE_TTL`              | `3600`                                                 | Cache expiry (seconds)          |
+| `REQUEST_TIMEOUT`        | `10`                                                   | Timeout for HTTP requests       |
 
 ---
 
 ## How It Works
 
-1. **Log Discovery**: Load usable CT logs from Google's JSON list.
-2. **Threaded Monitoring**: Spawn a thread per log, polling tree size every `FETCH_INTERVAL` seconds.
-3. **Batch Fetching**: Download new entries in batches of size `BATCH_SIZE`.
-4. **Parsing**: Decode DER certificates, extract metadata (fingerprint, domains, validity, key usage, extensions).
-5. **Deduplication**: Use `cachetools.TTLCache` to skip already seen fingerprints.
-6. **Indexing**: Bulk index parsed documents to Elasticsearch.
-7. **Shutdown**: Handle `SIGINT`/`SIGTERM` for graceful exit.
+1. Loads a list of usable CT logs.
+2. Starts one monitoring thread per log.
+3. Each thread polls the log, checks for new entries, and fetches them in batches.
+4. Entries are parsed into structured metadata (issuer, domains, expiry, key usage, etc.).
+5. Duplicate certificates (by fingerprint) are skipped using `cachetools.TTLCache`.
+6. Parsed entries are bulk indexed into Elasticsearch via the official client.
+7. Handles shutdown signals gracefully.
 
 ---
 
-## Extending
+## Elasticsearch Index Mapping
 
-* **Add Data Sources**: Integrate additional CT feed sources (e.g., CertStream).
-* **Alerting**: Hook into webhooks/emails for real-time alerts on specific certificates.
-* **Custom Mappings**: Tailor Elasticsearch mappings for performance and query patterns.
+An index template (`ct-monitor-template`) is auto-created for you, containing mappings for:
 
----
+* `@timestamp`, `fingerprint`, `subject_cn`, `issuer_cn`
+* Validity dates, public key info, key usages
+* Source log name and entry metadata
 
-## Contributing
-
-1. Fork and clone.
-2. Create a branch: `git checkout -b feature/my-feature`
-3. Commit: `git commit -m "Add feature"`
-4. Push and open a PR.
-
-Please include tests and documentation for new functionality.
+No manual setup is required — the template is installed if it doesn't exist.
 
 ---
 
-## License
+## Local Testing
 
-MIT License. See [LICENSE](LICENSE) for details.
+```bash
+python src/main.py
+```
+
+This will:
+
+* Connect to Elasticsearch
+* Load the CT logs
+* Start fetching and indexing entries in real time
+
+---
+
+## Extending the Monitor
+
+* Add webhook/email alerts for specific certs
+* Integrate CertStream or other live feed sources
+* Enrich parsed certs with WHOIS or threat intelligence
+* Build Kibana dashboards for visualization
+
+---
