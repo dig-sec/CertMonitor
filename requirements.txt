@@ -1,3 +1,6 @@
-certstream
-elasticsearch
+asn1crypto
+cachetools
+requests
 python-dotenv
+cryptography
+elasticsearch>=8.0.0

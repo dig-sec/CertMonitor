@@ -1,12 +1,12 @@
-version: '3'
 services:
-  app:
+  certmonitor:
     build: .
-    container_name: certmonitor_app
+    container_name: certmonitor
+    command: ["python", "src/main.py"]
+    env_file: .env
     volumes:
       - .:/app
     working_dir: /app
-    env_file: 
-      - .env
-    restart: always
-    command: python src/main.py
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

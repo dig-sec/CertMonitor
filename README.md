@@ -1,170 +1,222 @@
-# CertMonitor
+# Certificate Transparency Monitor
 
-**CertMonitor** is a Python-based application designed to fetch newly registered SSL certificates from certificate transparency logs (e.g., CertStream) and store them in Elasticsearch. The application ensures consistency and scalability, supporting configurable logging and security options.
+**CertMonitor** is a Python3 application that continuously monitors Certificate Transparency (CT) logs for newly issued X.509 and Precertificate entries and indexes them into Elasticsearch.
+
+---
+
+## Project Structure
+
+```
+CertMonitor/        # project root
+├── app/
+│   └── main.py      # entrypoint
+├── Dockerfile       # container build instructions
+├── docker-compose.yml
+├── requirements.txt
+├── .env_sample       # example environment file
+├── README.md         # this documentation
+└── Makefile          # helper commands (optional)
+```
 
 ---
 
 ## Features
 
-- Fetches newly issued SSL certificates via CertStream.
-- Stores certificate details in an Elasticsearch index.
-- Configurable logging level and options for suppressing TLS warnings.
-- Dockerized for easy deployment.
-- Highly customizable via environment variables.
+* Fetches and parses CT log entries from all usable logs listed in [Google's CT log list](https://www.gstatic.com/ct/log_list/v3/log_list.json).
+* Supports both X.509 and Precertificate entry types.
+* Deduplicates via in-memory caching (TTL-based) to avoid reprocessing certificates.
+* Batch indexing into Elasticsearch using the Bulk API.
+* Robust HTTP requests with retries, exponential backoff, and 429 handling.
+* Configurable via environment variables or a `.env` file.
+* Graceful shutdown on `SIGINT` and `SIGTERM`.
+* (Optional) Dockerized for container-based deployment.
 
 ---
 
-## Getting Started
+## Prerequisites
 
-### Prerequisites
+* Python 3.7+
+* Elasticsearch 7.x or 8.x
+* (Optional) Docker & Docker Compose for containerized deployment
 
-- [Docker](https://www.docker.com/) and [Docker Compose](https://docs.docker.com/compose/) installed.
-- Access to an Elasticsearch instance.
+---
 
-### Clone the Repository
+## Installation
+
+### Clone the repository
 
 ```bash
-git clone https://github.com/your-repo/certmonitor.git
-cd certmonitor
+git clone https://github.com/dig-sec/CertMonitor.git
+cd ct-monitor
+```
+
+### Python setup
+
+```bash
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
+### Environment variables
+
+Copy the sample and edit values:
+
+```bash
+cp .env_sample .env
+# then edit .env with your settings
+```
+
+---
+
+## Docker Deployment
+
+A `Dockerfile` and `docker-compose.yml` are provided for containerized runs.
+
+### Dockerfile
+
+```dockerfile
+FROM python:3.11-slim
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y \
+    curl \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt ./
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && pip install -r requirements.txt \
+    && apt-get remove -y build-essential \
+    && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY . .
+
+CMD ["python", "app/main.py"]
+```
+
+### docker-compose.yml
+
+```yaml
+version: '3.8'
+services:
+  certmonitor:
+    build:
+      context: .
+    container_name: certmonitor
+    working_dir: /app
+    env_file: .env
+    volumes:
+      - ./:/app
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+```
+
+Bring up the container:
+
+```bash
+docker-compose up -d
 ```
 
 ---
 
 ## Configuration
 
-The application uses environment variables to configure its behavior. Define these variables in a `.env` file located in the root directory.
+Configure via environment variables in `.env` (see `.env_sample`):
 
-### Environment Variables
-
-| Variable                  | Description                                 | Default Value             |
-|---------------------------|---------------------------------------------|---------------------------|
-| `ELASTICSEARCH_HOST`      | Hostname or IP of the Elasticsearch server | `localhost`               |
-| `ELASTICSEARCH_PORT`      | Port of the Elasticsearch server           | `9200`                    |
-| `ELASTICSEARCH_INDEX`     | Index name for storing SSL certificates    | `ssl_certificates`        |
-| `ELASTICSEARCH_USERNAME`  | Elasticsearch username (optional)          | `None`                    |
-| `ELASTICSEARCH_PASSWORD`  | Elasticsearch password (optional)          | `None`                    |
-| `ELASTICSEARCH_VERIFY_CERTS` | Verify SSL/TLS certificates when connecting to Elasticsearch (`True`/`False`) | `False`                  |
-| `LOG_LEVEL`               | Logging level (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`) | `INFO`                   |
-
-### Suppressing TLS Warnings
-
-By default, the application uses the `ELASTICSEARCH_VERIFY_CERTS` variable to decide whether to verify Elasticsearch SSL/TLS certificates. Set this to `False` to disable verification, and the application will suppress related warnings automatically.
+| Variable                 | Default                                                | Description                            |
+| ------------------------ | ------------------------------------------------------ | -------------------------------------- |
+| `CT_LOG_LIST_URL`        | `https://www.gstatic.com/ct/log_list/v3/log_list.json` | CT log list metadata URL               |
+| `ELASTICSEARCH_HOSTS`    | `http://localhost:9200`                                | Elasticsearch host(s), comma-separated |
+| `ELASTICSEARCH_INDEX`    | `ssl_certificates`                                     | Target index name                      |
+| `ELASTICSEARCH_USERNAME` | `elastic`                                              | Elasticsearch username                 |
+| `ELASTICSEARCH_PASSWORD` | `changeme`                                             | Elasticsearch password                 |
+| `FETCH_INTERVAL`         | `60`                                                   | Seconds between batch polls            |
+| `BATCH_SIZE`             | `256`                                                  | Entries per bulk request               |
+| `CACHE_MAXSIZE`          | `100000`                                               | Max entries in cache                   |
+| `CACHE_TTL`              | `3600`                                                 | Cache TTL (seconds)                    |
+| `REQUEST_TIMEOUT`        | `10`                                                   | HTTP request timeout (seconds)         |
 
 ---
 
 ## Usage
 
-### Running Locally
+### Local
 
-1. **Install Dependencies**
+```bash
+python app/main.py
+```
 
-   Create a virtual environment and install the required dependencies:
+### Docker
 
-   ```bash
-   python3 -m venv venv
-   source venv/bin/activate
-   pip install -r requirements.txt
-   ```
+```bash
+docker-compose up -d
+```
 
-2. **Run the Application**
+The monitor will:
 
-   ```bash
-   python main.py
-   ```
+1. Connect to Elasticsearch and create the index/template if missing.
+2. Load all usable CT logs and spawn one thread per log.
+3. Fetch new entries in batches, parse and dedupe.
+4. Bulk index to Elasticsearch until interrupted.
 
-### Running with Docker
+---
 
-1. **Build the Docker Image**
+## Elasticsearch Index Template
 
-   ```bash
-   docker-compose build
-   ```
+An example template to ensure correct mappings:
 
-2. **Run the Application**
+```http
+PUT _index_template/ct-monitor-template
+{
+  "index_patterns": ["ct-monitor*"],
+  "template": { "mappings": { /* see mappings below */ } },
+  "priority": 500
+}
+```
 
-   ```bash
-   docker-compose up -d
-   ```
-
-3. **Check Logs**
-
-   ```bash
-   docker-compose logs -f certmonitor
-   ```
+Full mapping properties include date, keywords for fingerprints, issuer\_cn, subject\_cn, validity dates, public key info, URLs, key usages, and more.
 
 ---
 
 ## How It Works
 
-1. **Certificate Stream**:
-   - Fetches real-time SSL certificate data from CertStream.
-   - Processes the data and stores it in the Elasticsearch index.
-
-2. **Batch Processing**:
-   - Buffers certificates in batches of 100 before indexing in Elasticsearch.
-   - Ensures efficient storage and reduces network overhead.
-
-3. **Customizable Logging**:
-   - Set the `LOG_LEVEL` to control the verbosity of application logs.
-
-4. **Elasticsearch Integration**:
-   - Stores detailed SSL certificate information in the configured index.
-   - Optionally verifies SSL/TLS certificates using the `ELASTICSEARCH_VERIFY_CERTS` variable.
+1. **Log Discovery**: Load usable CT logs from Google's JSON list.
+2. **Threaded Monitoring**: Spawn a thread per log, polling tree size every `FETCH_INTERVAL` seconds.
+3. **Batch Fetching**: Download new entries in batches of size `BATCH_SIZE`.
+4. **Parsing**: Decode DER certificates, extract metadata (fingerprint, domains, validity, key usage, extensions).
+5. **Deduplication**: Use `cachetools.TTLCache` to skip already seen fingerprints.
+6. **Indexing**: Bulk index parsed documents to Elasticsearch.
+7. **Shutdown**: Handle `SIGINT`/`SIGTERM` for graceful exit.
 
 ---
 
-## Elasticsearch Indices
+## Extending
 
-### `ssl_certificates`
-
-Stores detailed SSL certificate data, including subject information, domains, validity periods, and extensions.
-
-#### Example Document
-```json
-{
-  "@timestamp": "2024-12-06T10:00:00Z",
-  "message_type": "certificate_update",
-  "subject": {
-    "common_name": "example.com",
-    "organization": "Example Org",
-    "country": "US"
-  },
-  "domains": {
-    "primary_domain": "example.com",
-    "additional_domains": ["www.example.com", "mail.example.com"]
-  },
-  "certificate": {
-    "not_before": "2024-12-01T00:00:00Z",
-    "not_after": "2025-12-01T00:00:00Z",
-    "serial_number": "123456789ABCDEF",
-    "fingerprint": "SHA256:..."
-  }
-}
-```
-
----
-
-## Extending the Application
-
-1. **Add New Data Sources**:
-   - Modify the `parse_certificate_update` function to incorporate other certificate transparency sources.
-
-2. **Enhance Elasticsearch Mappings**:
-   - Define custom mappings for the `ssl_certificates` index to optimize search queries and improve performance.
-
-3. **Integrate Alerting Mechanisms**:
-   - Add webhook or email notifications to alert about specific certificate updates.
+* **Add Data Sources**: Integrate additional CT feed sources (e.g., CertStream).
+* **Alerting**: Hook into webhooks/emails for real-time alerts on specific certificates.
+* **Custom Mappings**: Tailor Elasticsearch mappings for performance and query patterns.
 
 ---
 
 ## Contributing
 
-Contributions are welcome! Fork the repository and submit a pull request.
+1. Fork and clone.
+2. Create a branch: `git checkout -b feature/my-feature`
+3. Commit: `git commit -m "Add feature"`
+4. Push and open a PR.
+
+Please include tests and documentation for new functionality.
 
 ---
 
 ## License
 
-This project is licensed under the MIT License. See the `LICENSE` file for details.
-
----
+MIT License. See [LICENSE](LICENSE) for details.
