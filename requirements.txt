@@ -4,3 +4,4 @@ requests
 python-dotenv
 cryptography
 elasticsearch>=8.0.0
+elastic-transport

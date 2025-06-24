@@ -1,4 +1,5 @@
-from elasticsearch import Elasticsearch, exceptions as es_exceptions
+from elasticsearch import Elasticsearch
+from elastic_transport import ApiError
 import logging
 
 def get_client(cfg):
@@ -9,15 +10,26 @@ def get_client(cfg):
             request_timeout=cfg.request_timeout,
         )
         return client
-    except es_exceptions.ElasticsearchException as e:
+    except ApiError as e:
         logging.error(f"Failed to create Elasticsearch client: {e}")
         raise
 
-def ensure_index_exists(client: Elasticsearch, index_name: str):
-    template_name = "ssl-certificates-template"
+def ensure_index_exists(client: Elasticsearch, base_index_name: str):
+    index_name = f"{base_index_name}-000001"
+    alias_name = base_index_name
+    template_name = f"{base_index_name}-template"
+    policy_name = f"{base_index_name}_policy"
+
     template_body = {
-        "index_patterns": [index_name],
+        "index_patterns": [f"{base_index_name}-*"],
         "template": {
+            "settings": {
+                "index.lifecycle.name": policy_name,  # assumes policy already exists
+                "index.lifecycle.rollover_alias": alias_name,
+                "number_of_replicas": 1,
+                "refresh_interval": "1s",
+                "routing.allocation.include._tier_preference": "data_content"
+            },
             "mappings": {
                 "properties": {
                     "@timestamp": {"type": "date"},
@@ -74,23 +86,30 @@ def ensure_index_exists(client: Elasticsearch, index_name: str):
         },
         "priority": 500
     }
-    
+
     try:
-        # Check if template exists
         if not client.indices.exists_index_template(name=template_name):
             client.indices.put_index_template(name=template_name, body=template_body)
-            logging.info("Created ct-monitor index template in Elasticsearch.")
+            logging.info("Created index template.")
         else:
-            logging.info("ct-monitor index template already exists in Elasticsearch.")
-    except es_exceptions.ElasticsearchException as e:
+            logging.info("Index template already exists.")
+    except ApiError as e:
         logging.error(f"Error ensuring index template exists: {e}")
 
-    # Now ensure the index exists
     try:
         if not client.indices.exists(index=index_name):
-            client.indices.create(index=index_name)
-            logging.info(f"Created missing Elasticsearch index: {index_name}")
+            client.indices.create(
+                index=index_name,
+                body={
+                    "aliases": {
+                        alias_name: {
+                            "is_write_index": True
+                        }
+                    }
+                }
+            )
+            logging.info(f"Created index {index_name} with alias {alias_name}.")
         else:
-            logging.info(f"Elasticsearch index '{index_name}' already exists.")
-    except es_exceptions.ElasticsearchException as e:
+            logging.info(f"Index '{index_name}' already exists.")
+    except ApiError as e:
         logging.error(f"Error ensuring index exists: {e}")
