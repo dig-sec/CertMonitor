@@ -6,12 +6,32 @@ import time
 import requests
 from typing import Optional, Tuple, List
 from cachetools import TTLCache
-from elasticsearch.helpers import bulk
+from elasticsearch.helpers import BulkIndexError, bulk
 from ct_parser import parse_ct_entry
 from ct_utils import make_request, load_log_list
 
 # Thread-safe lock for shared cert cache
 seen_lock = Lock()
+
+def matches_subject_filter(cert_meta: dict, cfg) -> bool:
+    """Return whether a certificate subject matches the configured watchlist."""
+    subject = (cert_meta.get("subject_cn") or "").casefold()
+    match_groups = [
+        [term.strip().casefold() for term in group.split("+") if term.strip()]
+        for group in cfg.certificate_subject_match.split(";")
+        if group.strip()
+    ]
+    excluded_terms = [
+        term.strip().casefold()
+        for term in cfg.certificate_subject_exclude.split(",")
+        if term.strip()
+    ]
+
+    if match_groups and not any(
+        all(term in subject for term in group) for group in match_groups
+    ):
+        return False
+    return not any(term in subject for term in excluded_terms)
 
 def monitor_log(log_info: dict, cfg, client, seen_cache: TTLCache, stop_event: Event) -> None:
     """Monitor a single CT log for new certificates."""
@@ -90,7 +110,7 @@ def monitor_log(log_info: dict, cfg, client, seen_cache: TTLCache, stop_event: E
                     for idx, entry in enumerate(entries, start=start):
                         try:
                             cert_meta = parse_ct_entry(entry, url, idx, seen_cache, seen_lock)
-                            if cert_meta:
+                            if cert_meta and matches_subject_filter(cert_meta, cfg):
                                 cert_meta["source"]["name"] = desc
                                 docs.append(cert_meta)
                         except Exception as e:
@@ -111,6 +131,15 @@ def monitor_log(log_info: dict, cfg, client, seen_cache: TTLCache, stop_event: E
                             if failed:
                                 logging.warning(f"{desc}: {failed} documents failed to index")
                             logging.info(f"{desc}: Successfully indexed {success} documents to Elasticsearch.")
+                        except BulkIndexError as e:
+                            first_error = next(iter(e.errors[0].values())).get("error", {})
+                            logging.error(
+                                "%s: %d document(s) failed to index: %s: %s",
+                                desc,
+                                len(e.errors),
+                                first_error.get("type", "unknown_error"),
+                                first_error.get("reason", "no reason returned"),
+                            )
                         except Exception as e:
                             logging.error(f"{desc}: Bulk indexing failed: {e}")
 
@@ -139,6 +168,10 @@ def start_monitoring(cfg, client) -> Optional[Tuple[Event, List[Thread]]]:
         return None
 
     logging.info(f"Starting monitoring for {len(logs)} CT logs")
+    if cfg.certificate_subject_match:
+        logging.warning(
+            "Certificate subject filtering is enabled; only watchlist matches will be indexed."
+        )
     
     seen_cache = TTLCache(maxsize=cfg.cache_maxsize, ttl=cfg.cache_ttl)
     stop_event = threading.Event()

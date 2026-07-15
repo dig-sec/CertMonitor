@@ -94,6 +94,13 @@ Edit the `.env` file or override using environment variables:
 | `CACHE_MAXSIZE`          | `100000`                                               | Max cached fingerprints         |
 | `CACHE_TTL`              | `3600`                                                 | Cache expiry (seconds)          |
 | `REQUEST_TIMEOUT`        | `10`                                                   | Timeout for HTTP requests       |
+| `LOGGING_LEVEL`          | `INFO`                                                 | Python logging level            |
+| `CERTIFICATE_SUBJECT_MATCH` | empty                                              | Semicolon-separated OR groups; join required terms with `+` |
+| `CERTIFICATE_SUBJECT_EXCLUDE` | empty                                            | Comma-separated terms to reject |
+
+For targeted collection, `radgivning;finansiell;kort+bank` matches a subject
+containing `radgivning`, `finansiell`, or both `kort` and `bank`. Leaving the
+match setting empty retains every parsed certificate.
 
 ---
 

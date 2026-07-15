@@ -4,12 +4,12 @@ from config import Config
 from elastic import get_client, ensure_index_exists
 from monitor import start_monitoring
 
-# Setup logging
-logging.basicConfig(level=logging.INFO)
-
-
 def main():
     cfg = Config()
+    logging.basicConfig(
+        level=getattr(logging, cfg.logging_level.upper(), logging.INFO),
+        force=True,
+    )
     client = get_client(cfg)
     if not client.ping():
         logging.error("Cannot reach Elasticsearch")

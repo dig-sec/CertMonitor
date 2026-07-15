@@ -68,7 +68,8 @@ def ensure_index_exists(client: Elasticsearch, base_index_name: str):
                     "crl_url": {"type": "keyword"},
                     "key_usage": {"type": "keyword"},
                     "extended_key_usage": {"type": "keyword"},
-                    "cert_index": {"type": "integer"},
+                    # Public CT logs can exceed the signed 32-bit integer range.
+                    "cert_index": {"type": "long"},
                     "cert_link": {"type": "keyword"},
                     "seen": {"type": "date"},
                     "source": {
@@ -84,15 +85,14 @@ def ensure_index_exists(client: Elasticsearch, base_index_name: str):
                 }
             }
         },
-        "priority": 500
+        # Keep this above older one-off templates so rollover indices always
+        # receive the canonical alias, lifecycle policy, and mappings.
+        "priority": 501
     }
 
     try:
-        if not client.indices.exists_index_template(name=template_name):
-            client.indices.put_index_template(name=template_name, body=template_body)
-            logging.info("Created index template.")
-        else:
-            logging.info("Index template already exists.")
+        client.indices.put_index_template(name=template_name, body=template_body)
+        logging.info("Ensured index template is current.")
     except ApiError as e:
         logging.error(f"Error ensuring index template exists: {e}")
 

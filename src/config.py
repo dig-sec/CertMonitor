@@ -18,6 +18,9 @@ class Config:
     cache_maxsize: int = int(os.getenv("CACHE_MAXSIZE", "100000"))
     cache_ttl: int = int(os.getenv("CACHE_TTL", "3600"))
     request_timeout: int = int(os.getenv("REQUEST_TIMEOUT", "10"))
+    logging_level: str = os.getenv("LOGGING_LEVEL", "INFO")
+    certificate_subject_match: str = os.getenv("CERTIFICATE_SUBJECT_MATCH", "")
+    certificate_subject_exclude: str = os.getenv("CERTIFICATE_SUBJECT_EXCLUDE", "")
     ct_log_list_url: str = os.getenv(
         "CT_LOG_LIST_URL",
         "https://www.gstatic.com/ct/log_list/v3/log_list.json",
